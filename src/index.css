@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --canvas: #F8FAFC;
+  --panel: #FFFFFF;
+  --primary: #020617;
+  --accent: #64748B;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 antialiased min-h-screen;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Glassmorphism utility - Clean Standard Shadows */
+.glass-panel {
+  @apply bg-white border border-slate-200 shadow-md transition-all duration-300;
+  border-radius: 16px;
+}
+
+.glass-panel:hover {
+  @apply shadow-xl -translate-y-[2px];
+}
+
+/* Gradient Header for Segments */
+.gradient-header {
+  background: linear-gradient(90deg, #020617 0%, #1e293b 100%);
+  @apply text-white px-6 py-3 rounded-t-2xl flex justify-between items-center;
+}
+
+/* Input styles with black text override */
+.input-cell {
+  @apply bg-slate-100/50 border border-transparent rounded-md px-2 py-1.5 text-[11px] font-bold outline-none transition-all duration-200 w-full;
+  @apply focus:bg-white focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-slate-300;
+  @apply disabled:bg-slate-50 disabled:text-slate-400;
+  color: #020617 !important;
+}
+
+/* Ensure select elements don't show red text on Windows/Chrome */
+select.input-cell {
+  color: #020617 !important;
+}
+
+select.input-cell option {
+  color: #020617 !important;
+  @apply bg-white;
+}
+
+@media (max-width: 1024px) {
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+@media (min-width: 1025px) {
+  .mobile-only {
+    display: none !important;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-400/50 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500/50;
+}
+
+.label-caps {
+  @apply text-[10px] font-bold tracking-[0.15em] uppercase text-accent mb-2 block;
+}
+
+.font-mono-tech {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
