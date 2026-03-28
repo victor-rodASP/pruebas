@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 import { Send, RotateCcw, Plus, MapPin, Search, Navigation, Calendar, Clock, Trash2, Phone, MoreHorizontal, User, Tag, CheckCircle2 } from 'lucide-react';
 import { useAgenda } from '../../context/AgendaContext';
+import { useAuth } from '../../context/AuthContext';
 import KpiCompromisos from './KpiCompromisos';
 
 const timeOptions = [];
@@ -11,8 +13,6 @@ for (let hour = 8; hour <= 20; hour++) {
         timeOptions.push(`${h}:${min}`);
     }
 }
-
-// --- HELPER COMPONENTS & FUNCTIONS ---
 
 const handleNumericChange = (value, callback, limit = null) => {
     const cleanValue = value.replace(/\D/g, '');
@@ -39,18 +39,27 @@ const handlePercentageChange = (value, callback) => {
     callback(finalValue);
 };
 
-// Autocomplete Name Input
-const ClientNameInput = ({ value, idx, segmentName, updateVisit, mockDatabase }) => {
+const ClientNameInput = ({ value, idx, segmentName, updateVisit, clientsDatabase }) => {
     const [query, setQuery] = useState(value || '');
     const [showSuggestions, setShowSuggestions] = useState(false);
     const containerRef = useRef(null);
 
-    // Filter suggestions based on input
-    const suggestions = mockDatabase.filter(item =>
-        query.length > 1 &&
-        item.name.toLowerCase().includes(query.toLowerCase()) &&
-        item.name !== query.toUpperCase()
-    ).slice(0, 5);
+    const isCarteraSegment = segmentName.toLowerCase().includes('seguimiento') || 
+                             segmentName.toLowerCase().includes('gestión') || 
+                             segmentName.toLowerCase().includes('visita') || 
+                             segmentName.toLowerCase().includes('cartera') ||
+                             segmentName.toLowerCase().includes('compromiso');
+
+    const suggestions = (clientsDatabase || []).filter(item => {
+        if (query.length <= 1) return false;
+        if (!item.name.toLowerCase().includes(query.toLowerCase())) return false;
+        if (item.name === query.toUpperCase()) return false;
+
+        if (isCarteraSegment && item.classification !== 'Cliente') return false;
+        if (!isCarteraSegment && item.classification === 'Cliente') return false;
+
+        return true;
+    }).slice(0, 5);
 
     useEffect(() => {
         setQuery(value || '');
@@ -68,11 +77,7 @@ const ClientNameInput = ({ value, idx, segmentName, updateVisit, mockDatabase })
 
     const handleSelect = (item) => {
         setQuery(item.name);
-        // Force classification if it's Portfolio or Management
-        const isClientOnlySegment = segmentName === 'Seguimiento de Cartera' || segmentName === 'Gestión de Empresarias';
-        if (isClientOnlySegment) {
-            updateVisit(segmentName, idx, 'classification', 'Cliente');
-        }
+        updateVisit(segmentName, idx, 'classification', item.classification);
         updateVisit(segmentName, idx, 'name', item.name);
         setShowSuggestions(false);
     };
@@ -100,7 +105,7 @@ const ClientNameInput = ({ value, idx, segmentName, updateVisit, mockDatabase })
             {showSuggestions && suggestions.length > 0 && (
                 <div className="absolute z-[100] top-full mt-1 w-full bg-white rounded-xl shadow-2xl border border-slate-100 py-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="px-3 py-1 text-[8px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50 mb-1">
-                        Coincidencias encontradas
+                        {isCarteraSegment ? 'Cartera encontrada' : 'Contactos encontrados'}
                     </div>
                     {suggestions.map((item, sIdx) => (
                         <button
@@ -110,7 +115,7 @@ const ClientNameInput = ({ value, idx, segmentName, updateVisit, mockDatabase })
                         >
                             <div className="flex flex-col">
                                 <span className="text-[11px] font-bold text-slate-700 group-hover:text-blue-700 uppercase">{item.name}</span>
-                                <span className="text-[9px] font-medium text-slate-400">{item.city} | {item.classification}</span>
+                                <span className="text-[9px] font-medium text-slate-400">{item.streets || 'Sin dirección'} | {item.classification}</span>
                             </div>
                             <div className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-tighter ${item.classification === 'Cliente' ? 'bg-emerald-100 text-emerald-700' :
                                 item.classification === 'Prospecto' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-700'
@@ -173,30 +178,98 @@ const PhoneFields = ({ v, idx, segmentName, updateVisit }) => {
     );
 };
 
-const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAvailable, mockDatabase }) => {
-    const isClientOnlySegment = segmentName === 'Seguimiento de Cartera' || segmentName === 'Gestión de Empresarias';
+const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAvailable, clientsDatabase }) => {
+    const { catalogs } = useAgenda();
+    const nameLower = segmentName.toLowerCase();
+    
+    const isClientOnlySegment = nameLower.includes('seguimiento') || nameLower.includes('cartera') || nameLower.includes('gestión') || nameLower.includes('visita') || nameLower.includes('compromiso');
 
     const renderSegmentDetails = () => {
-        switch (segmentName) {
-            case 'Promoción':
-                return (
-                    <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100 mt-2 ml-14">
+        if (nameLower.includes('promoción') || nameLower.includes('promocion')) {
+            return (
+                <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100 mt-2 ml-14">
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Producto</label>
+                        <select
+                            value={v.product}
+                            onChange={e => updateVisit(segmentName, idx, 'product', e.target.value)}
+                            className={`input-cell uppercase ${!v.product ? 'text-slate-400' : 'text-primary'}`}
+                        >
+                            <option value="" disabled>Seleccionar producto...</option>
+                            {catalogs.productos.map(p => (
+                                <option key={p.idProducto} value={p.idProducto}>
+                                    {p.nombre}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="col-span-2">
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Dirección (Ciudad / Col / Calle)</label>
+                        <div className="flex gap-1.5">
+                            <input placeholder="Ciudad" value={v.city} onChange={e => updateVisit(segmentName, idx, 'city', e.target.value)} className="input-cell text-[10px]" />
+                            <input placeholder="Colonia" value={v.colony} onChange={e => updateVisit(segmentName, idx, 'colony', e.target.value)} className="input-cell text-[10px]" />
+                            <input placeholder="Calles" value={v.streets} onChange={e => updateVisit(segmentName, idx, 'streets', e.target.value)} className="input-cell text-[10px]" />
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Teléfonos</label>
+                        <PhoneFields v={v} idx={idx} segmentName={segmentName} updateVisit={updateVisit} />
+                    </div>
+                </div>
+            );
+        }
+
+        if (nameLower.includes('evaluación') || nameLower.includes('integración') || nameLower.includes('prospecto')) {
+            return (
+                <div className="space-y-3 mt-2 ml-14">
+                    <div className="grid grid-cols-5 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
                         <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Producto</label>
-                            <select
-                                value={v.product}
-                                onChange={e => updateVisit(segmentName, idx, 'product', e.target.value)}
-                                className={`input-cell uppercase ${!v.product ? 'text-slate-400' : 'text-primary'}`}
-                            >
-                                <option value="" disabled>Seleccionar producto...</option>
-                                <optgroup label="Crédito">
-                                    <option>Microcredito</option><option>Consumo</option><option>Pyme</option><option>Crédito Fácil</option>
-                                </optgroup>
-                                <optgroup label="Ahorro">
-                                    <option>Captación</option>
-                                </optgroup>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Integración</label>
+                            <select value={v.typeIntegration} onChange={e => updateVisit(segmentName, idx, 'typeIntegration', e.target.value)} className="input-cell uppercase text-[10px]">
+                                <option>Nuevo</option><option>Renovación</option><option>Tratamiento</option><option>Convenio</option>
                             </select>
                         </div>
+                        <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Monto Estimado</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    value={v.isFocusedAmount ? v.estimatedAmount : formatCurrency(v.estimatedAmount)}
+                                    onFocus={() => updateVisit(segmentName, idx, 'isFocusedAmount', true)}
+                                    onBlur={() => updateVisit(segmentName, idx, 'isFocusedAmount', false)}
+                                    onChange={e => handleNumericChange(e.target.value, (val) => updateVisit(segmentName, idx, 'estimatedAmount', val))}
+                                    placeholder="$ 0.00"
+                                    className="input-cell font-bold text-primary"
+                                />
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Tasa Anual</label>
+                            <div className="relative">
+                                <input
+                                    value={v.annualRate}
+                                    onChange={e => handlePercentageChange(e.target.value, (val) => updateVisit(segmentName, idx, 'annualRate', val))}
+                                    placeholder="0.00"
+                                    className="input-cell font-bold pr-8"
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">%</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Subproducto</label>
+                            <select value={v.subProduct} onChange={e => updateVisit(segmentName, idx, 'subProduct', e.target.value)} className="input-cell uppercase text-[10px]">
+                                <option>NINGUNO</option><option>PREFERENCIAL</option><option>BOLSÓN</option><option>BACK TO BACK</option><option>LIQUIDEZ</option><option>FASTCREDIT</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Programa</label>
+                            <select value={v.program} onChange={e => updateVisit(segmentName, idx, 'program', e.target.value)} className="input-cell uppercase text-[10px]" disabled={v.product === 'Captación'}>
+                                <option>NINGUNO</option><option>SCORE 500</option><option>ATRACCIÓN DE LA COMPETENCIA</option><option>OTRO</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
                         <div className="col-span-2">
                             <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Dirección (Ciudad / Col / Calle)</label>
                             <div className="flex gap-1.5">
@@ -205,200 +278,155 @@ const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAva
                                 <input placeholder="Calles" value={v.streets} onChange={e => updateVisit(segmentName, idx, 'streets', e.target.value)} className="input-cell text-[10px]" />
                             </div>
                         </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Teléfonos</label>
-                            <PhoneFields v={v} idx={idx} segmentName={segmentName} updateVisit={updateVisit} />
-                        </div>
-                    </div>
-                );
-            case 'Evaluación e Integración':
-                return (
-                    <div className="space-y-3 mt-2 ml-14">
-                        <div className="grid grid-cols-5 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Integración</label>
-                                <select value={v.typeIntegration} onChange={e => updateVisit(segmentName, idx, 'typeIntegration', e.target.value)} className="input-cell uppercase text-[10px]">
-                                    <option>Nuevo</option><option>Renovación</option><option>Tratamiento</option><option>Convenio</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Monto Estimado</label>
-                                <div className="relative">
-                                    <input
-                                        type="text"
-                                        value={v.isFocusedAmount ? v.estimatedAmount : formatCurrency(v.estimatedAmount)}
-                                        onFocus={() => updateVisit(segmentName, idx, 'isFocusedAmount', true)}
-                                        onBlur={() => updateVisit(segmentName, idx, 'isFocusedAmount', false)}
-                                        onChange={e => handleNumericChange(e.target.value, (val) => updateVisit(segmentName, idx, 'estimatedAmount', val))}
-                                        placeholder="$ 0.00"
-                                        className="input-cell font-bold text-primary"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Tasa Anual</label>
-                                <div className="relative">
-                                    <input
-                                        value={v.annualRate}
-                                        onChange={e => handlePercentageChange(e.target.value, (val) => updateVisit(segmentName, idx, 'annualRate', val))}
-                                        placeholder="0.00"
-                                        className="input-cell font-bold pr-8"
-                                    />
-                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold">%</span>
-                                </div>
-                            </div>
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Subproducto</label>
-                                <select value={v.subProduct} onChange={e => updateVisit(segmentName, idx, 'subProduct', e.target.value)} className="input-cell uppercase text-[10px]">
-                                    <option>NINGUNO</option><option>PREFERENCIAL</option><option>BOLSÓN</option><option>BACK TO BACK</option><option>LIQUIDEZ</option><option>FASTCREDIT</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Programa</label>
-                                <select value={v.program} onChange={e => updateVisit(segmentName, idx, 'program', e.target.value)} className="input-cell uppercase text-[10px]" disabled={v.product === 'Captación'}>
-                                    <option>NINGUNO</option><option>SCORE 500</option><option>ATRACCIÓN DE LA COMPETENCIA</option><option>OTRO</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100">
-                            <div className="col-span-2">
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Dirección (Ciudad / Col / Calle)</label>
-                                <div className="flex gap-1.5">
-                                    <input placeholder="Ciudad" value={v.city} onChange={e => updateVisit(segmentName, idx, 'city', e.target.value)} className="input-cell text-[10px]" />
-                                    <input placeholder="Colonia" value={v.colony} onChange={e => updateVisit(segmentName, idx, 'colony', e.target.value)} className="input-cell text-[10px]" />
-                                    <input placeholder="Calles" value={v.streets} onChange={e => updateVisit(segmentName, idx, 'streets', e.target.value)} className="input-cell text-[10px]" />
-                                </div>
-                            </div>
-                            <div className="col-span-2">
-                                <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Estatus Cartera (Sistema)</label>
-                                <div className={`input-cell text-[10px] font-bold flex items-center h-[42px] px-4 ${v.portfolioStatus && v.portfolioStatus !== 'N/A' ? 'text-primary' : 'text-slate-400'}`}>
-                                    {v.portfolioStatus || 'AUTOMÁTICO'}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            case 'Seguimiento de Cartera':
-                return (
-                    <div className="grid grid-cols-4 gap-x-3 gap-y-4 bg-slate-50/50 p-4 rounded-xl border border-slate-100 mt-2 ml-14 shadow-sm">
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">ID Crédito</label>
-                            <div className="input-cell font-mono-tech flex items-center px-4 h-[42px] bg-white border-slate-100 text-primary">
-                                {v.idCredito || 'S/N'}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Estatus Cartera</label>
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-black uppercase text-primary h-[42px] flex items-center px-4">
-                                {v.ultimoEstatus || 'S/N'}
-                            </div>
-                        </div>
                         <div className="col-span-2">
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Mora (Inicio / Actual)</label>
-                            <div className="flex gap-2">
-                                <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-accent">Inicio: {v.moraInicioMes || 0} días</div>
-                                <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-red-500">Actual: {v.moraActual || 0} días</div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Estatus Cartera (Sistema)</label>
+                            <div className={`input-cell text-[10px] font-bold flex items-center h-[42px] px-4 ${v.portfolioStatus && v.portfolioStatus !== 'N/A' ? 'text-primary' : 'text-slate-400'}`}>
+                                {v.portfolioStatus || 'AUTOMÁTICO'}
                             </div>
                         </div>
+                    </div>
+                </div>
+            );
+        }
 
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Fechas (Último Pago / Venc.)</label>
-                            <div className="flex gap-1">
-                                <div className="flex-1 bg-white p-1.5 rounded-lg border border-slate-100 text-[9px] font-bold flex flex-col justify-center items-center">
-                                    <span className="text-[7px] text-slate-400">PAGO</span>
-                                    {v.ultimaFechaPago || '-'}
-                                </div>
-                                <div className="flex-1 bg-white p-1.5 rounded-lg border border-slate-100 text-[9px] font-bold flex flex-col justify-center items-center">
-                                    <span className="text-[7px] text-slate-400">VENC.</span>
-                                    {v.fechaVencimiento || '-'}
-                                </div>
-                            </div>
+        if (nameLower.includes('compromiso')) {
+            return (
+                <div className="grid grid-cols-4 gap-4 bg-amber-50/30 p-4 rounded-xl border border-amber-100 mt-2 ml-14 shadow-sm">
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">ID Crédito / Control</label>
+                        <div className="input-cell font-mono-tech flex items-center px-4 h-[42px] bg-white border-slate-100 text-primary">
+                            {v.idCredito || v.idControl || 'S/N'}
                         </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Saldos (Inicio / Actual)</label>
-                            <div className="flex gap-2">
-                                <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold">In: {formatCurrency(v.saldoInicioMes)}</div>
-                                <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-accent">Act: {formatCurrency(v.saldoActual)}</div>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Categoría</label>
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-black uppercase text-accent h-[42px] flex items-center px-4">
-                                {v.categoriaGestion || 'PREVENTIVO'}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Monto Amort.</label>
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold h-[42px] flex items-center px-4">
-                                {formatCurrency(v.montoAmortizacion)}
-                            </div>
-                        </div>
-
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Monto p/Corriente</label>
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-red-600 h-[42px] flex items-center px-4">
-                                {formatCurrency(v.montoRequeridoCorriente)}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Herramienta Aplicada</label>
-                            <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold h-[42px] flex items-center px-4">
-                                {v.herramientaAplicada || 'NINGUNA'}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Tipo de Gestión (Personal)</label>
-                            <input
-                                value={v.typeVisitManagement}
-                                onChange={e => updateVisit(segmentName, idx, 'typeVisitManagement', e.target.value)}
-                                className="input-cell uppercase text-[10px] h-[42px]"
-                                placeholder="Describir tipo de gestión..."
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-1 block pl-1">Fecha Promesa</label>
+                        <input 
+                            type="date" 
+                            value={v.fechaCompromiso || ''} 
+                            onChange={e => updateVisit(segmentName, idx, 'fechaCompromiso', e.target.value)}
+                            className="input-cell h-[42px] text-[11px] font-bold text-amber-700 uppercase border-amber-200 focus:border-amber-400 focus:ring-amber-400/20 bg-white"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-amber-600 uppercase tracking-widest mb-1 block pl-1">Monto a Pagar</label>
+                        <div className="relative">
+                            <input 
+                                type="text"
+                                value={v.isFocusedAmount ? (v.montoCompromiso || '') : formatCurrency(v.montoCompromiso)}
+                                onFocus={() => updateVisit(segmentName, idx, 'isFocusedAmount', true)}
+                                onBlur={() => updateVisit(segmentName, idx, 'isFocusedAmount', false)}
+                                onChange={e => handleNumericChange(e.target.value, (val) => updateVisit(segmentName, idx, 'montoCompromiso', val))}
+                                placeholder="$ 0.00"
+                                className="input-cell h-[42px] font-bold text-amber-700 border-amber-200 focus:border-amber-400 focus:ring-amber-400/20 bg-white"
                             />
                         </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Herramienta para Aplicar</label>
-                            <select
-                                value={v.herramientaAplicar}
-                                onChange={e => updateVisit(segmentName, idx, 'herramientaAplicar', e.target.value)}
-                                className="input-cell uppercase text-[10px] h-[42px]"
-                            >
-                                <option>Ninguna</option>
-                                <option>Cobranza</option>
-                                <option>Renovación Especial</option>
-                                <option>Tratamiento</option>
-                                <option>Convenio Liquidación</option>
-                            </select>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Estatus Cartera Actual</label>
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-black uppercase text-primary h-[42px] flex items-center px-4">
+                            {v.ultimoEstatus || 'S/N'}
                         </div>
                     </div>
-                );
-            case 'Gestión de Empresarias':
-                return (
-                    <div className="grid grid-cols-4 gap-3 bg-slate-50/50 p-3 rounded-xl border border-slate-100 mt-2 ml-14">
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Información</label>
-                            <div className="flex flex-col text-[10px] font-bold text-accent bg-white p-2 rounded-lg border border-slate-50">
-                                <span>Ingreso: {v.fechaIngreso || '-'}</span>
-                                <span>Mora Actual: {v.moraDays || 0}</span>
-                            </div>
-                        </div>
-                        <div>
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Saldos</label>
-                            <div className="flex flex-col text-[10px] font-bold text-accent bg-white p-2 rounded-lg border border-slate-50">
-                                <span>Ocup: {formatCurrency(v.saldoOcupado)}</span>
-                                <span className="text-emerald-600">Disp: {formatCurrency(v.saldoDisponible)}</span>
-                            </div>
-                        </div>
-                        <div className="col-span-2">
-                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Tipo Gestión</label>
-                            <select value={v.typeManagement} onChange={e => updateVisit(segmentName, idx, 'typeManagement', e.target.value)} className="input-cell uppercase text-[10px]">
-                                <option>Visita integral</option><option>Visita correctiva</option><option>Visita preventiva</option><option>Visita presencial domicilio</option><option>Visita presencial aval</option><option>Visita presencial Trabajo</option><option>Gestión telefónica</option>
-                            </select>
-                        </div>
-                    </div>
-                );
-            default: return null;
+                </div>
+            );
         }
+
+        if (nameLower.includes('seguimiento') || nameLower.includes('gestión') || nameLower.includes('visita')) {
+            return (
+                <div className="grid grid-cols-4 gap-x-3 gap-y-4 bg-slate-50/50 p-4 rounded-xl border border-slate-100 mt-2 ml-14 shadow-sm">
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">ID Crédito</label>
+                        <div className="input-cell font-mono-tech flex items-center px-4 h-[42px] bg-white border-slate-100 text-primary">
+                            {v.idCredito || 'S/N'}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Estatus Cartera</label>
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-black uppercase text-primary h-[42px] flex items-center px-4">
+                            {v.ultimoEstatus || 'S/N'}
+                        </div>
+                    </div>
+                    <div className="col-span-2">
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Mora (Inicio / Actual)</label>
+                        <div className="flex gap-2">
+                            <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-accent">Inicio: {v.moraInicioMes || 0} días</div>
+                            <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-red-500">Actual: {v.moraActual || 0} días</div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Fechas (Último Pago / Venc.)</label>
+                        <div className="flex gap-1">
+                            <div className="flex-1 bg-white p-1.5 rounded-lg border border-slate-100 text-[9px] font-bold flex flex-col justify-center items-center">
+                                <span className="text-[7px] text-slate-400">PAGO</span>
+                                {v.ultimaFechaPago || '-'}
+                            </div>
+                            <div className="flex-1 bg-white p-1.5 rounded-lg border border-slate-100 text-[9px] font-bold flex flex-col justify-center items-center">
+                                <span className="text-[7px] text-slate-400">VENC.</span>
+                                {v.fechaVencimiento || '-'}
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Saldos (Inicio / Actual)</label>
+                        <div className="flex gap-2">
+                            <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold">In: {formatCurrency(v.saldoInicioMes)}</div>
+                            <div className="flex-1 bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-accent">Act: {formatCurrency(v.saldoActual)}</div>
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Categoría</label>
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-black uppercase text-accent h-[42px] flex items-center px-4">
+                            {v.categoriaGestion || 'PREVENTIVO'}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Monto Amort.</label>
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold h-[42px] flex items-center px-4">
+                            {formatCurrency(v.montoAmortizacion)}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Monto p/Corriente</label>
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold text-red-600 h-[42px] flex items-center px-4">
+                            {formatCurrency(v.montoRequeridoCorriente)}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Herramienta Aplicada</label>
+                        <div className="bg-white p-2.5 rounded-lg border border-slate-100 text-[10px] font-bold h-[42px] flex items-center px-4">
+                            {v.herramientaAplicada || 'NINGUNA'}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Tipo de Gestión (Personal)</label>
+                        <input
+                            value={v.typeVisitManagement}
+                            onChange={e => updateVisit(segmentName, idx, 'typeVisitManagement', e.target.value)}
+                            className="input-cell uppercase text-[10px] h-[42px]"
+                            placeholder="Describir tipo de gestión..."
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1 block pl-1">Herramienta para Aplicar</label>
+                        <select
+                            value={v.herramientaAplicar}
+                            onChange={e => updateVisit(segmentName, idx, 'herramientaAplicar', e.target.value)}
+                            className="input-cell uppercase text-[10px] h-[42px]"
+                        >
+                            <option>Ninguna</option>
+                            <option>Cobranza</option>
+                            <option>Renovación Especial</option>
+                            <option>Tratamiento</option>
+                            <option>Convenio Liquidación</option>
+                        </select>
+                    </div>
+                </div>
+            );
+        }
+
+        return null;
     };
 
     return (
@@ -407,18 +435,25 @@ const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAva
                 <div className="w-8 flex justify-center font-mono-tech text-[12px] text-accent">{idx + 1}</div>
 
                 <div className="w-32">
-                    <select
-                        value={v.time}
-                        onChange={e => updateVisit(segmentName, idx, 'time', e.target.value)}
-                        className="input-cell !py-2 font-bold"
-                    >
-                        <option value="" disabled>Hora...</option>
-                        {timeOptions.map(t => (
-                            <option key={t} value={t} disabled={!isTimeAvailable(t, v.id)}>
-                                {t} {!isTimeAvailable(t, v.id) ? ' (X)' : ''}
-                            </option>
-                        ))}
-                    </select>
+                    {/* 🚀 AÑADIDO: Ocultar selector de horas si es compromiso */}
+                    {nameLower.includes('compromiso') ? (
+                        <div className="input-cell !py-2 font-black text-[9px] text-amber-600 bg-amber-50 border-amber-100 flex items-center justify-center tracking-widest uppercase">
+                            Todo el día
+                        </div>
+                    ) : (
+                        <select
+                            value={v.time}
+                            onChange={e => updateVisit(segmentName, idx, 'time', e.target.value)}
+                            className="input-cell !py-2 font-bold"
+                        >
+                            <option value="" disabled>Hora...</option>
+                            {timeOptions.map(t => (
+                                <option key={t} value={t} disabled={!isTimeAvailable(t, v.id)}>
+                                    {t} {!isTimeAvailable(t, v.id) ? ' (X)' : ''}
+                                </option>
+                            ))}
+                        </select>
+                    )}
                 </div>
 
                 <div className="flex-[2] min-w-0">
@@ -427,7 +462,7 @@ const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAva
                         idx={idx}
                         segmentName={segmentName}
                         updateVisit={updateVisit}
-                        mockDatabase={mockDatabase}
+                        clientsDatabase={clientsDatabase}
                     />
                 </div>
 
@@ -436,14 +471,14 @@ const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAva
                         <select value={v.classification} onChange={e => updateVisit(segmentName, idx, 'classification', e.target.value)} className="input-cell !py-2 uppercase font-black tracking-widest text-[9px]">
                             <option>Contacto</option>
                             <option>Prospecto</option>
-                            {segmentName !== 'Promoción' && <option>Cliente</option>}
+                            {!nameLower.includes('promoción') && !nameLower.includes('promocion') && <option>Cliente</option>}
                         </select>
                     </div>
                 )}
 
                 {!isClientOnlySegment && (
                     <div className="flex-1 min-w-0">
-                        {segmentName === 'Evaluación e Integración' ? (
+                        {nameLower.includes('evaluación') || nameLower.includes('integración') ? (
                             <select
                                 value={v.activity}
                                 onChange={e => updateVisit(segmentName, idx, 'activity', e.target.value)}
@@ -483,13 +518,14 @@ const DesktopRowFull = ({ v, idx, segmentName, updateVisit, removeRow, isTimeAva
 };
 
 const SegmentSection = ({ title, visits, segmentName }) => {
-    const { currentAgenda, updateVisit, addRow, removeRow, getVisibleSegments, mockDatabase } = useAgenda();
-    const isClientOnlySegment = segmentName === 'Seguimiento de Cartera' || segmentName === 'Gestión de Empresarias';
+    const { currentAgenda, updateVisit, addRow, removeRow, clientsDatabase } = useAgenda();
+    const isClientOnlySegment = segmentName.toLowerCase().includes('seguimiento') || segmentName.toLowerCase().includes('gestión') || segmentName.toLowerCase().includes('visita') || segmentName.toLowerCase().includes('compromiso');
+
+    const safeVisits = visits || [];
 
     const isTimeAvailable = (time, currentVisitId) => {
-        const allVisits = Object.entries(currentAgenda.segments)
-            .filter(([name]) => getVisibleSegments().includes(name))
-            .flatMap(([_, vArr]) => vArr.filter(v => v.time && v.id !== currentVisitId));
+        const allVisits = Object.values(currentAgenda.segments || {})
+            .flatMap(vArr => (vArr || []).filter(v => v.time && v.id !== currentVisitId));
 
         const timeToMin = (t) => {
             const [h, m] = t.split(':').map(Number);
@@ -500,8 +536,15 @@ const SegmentSection = ({ title, visits, segmentName }) => {
         for (const v of allVisits) {
             const vMin = timeToMin(v.time);
             if (v.time === time) return false;
-            const isOnePromo = segmentName === 'Promoción' || currentAgenda.segments['Promoción'].some(p => p.id === v.id);
-            if (isOnePromo && Math.abs(targetMin - vMin) < 30) return false;
+            
+            const isOnePromo = segmentName.toLowerCase().includes('promoción') || segmentName.toLowerCase().includes('promocion');
+            const promoSegments = Object.entries(currentAgenda.segments || {})
+                .filter(([name]) => name.toLowerCase().includes('promoción') || name.toLowerCase().includes('promocion'))
+                .flatMap(([_, arr]) => arr || []);
+                
+            const involvesPromo = isOnePromo || promoSegments.some(p => p.id === v.id);
+
+            if (involvesPromo && Math.abs(targetMin - vMin) < 30) return false;
         }
         return true;
     };
@@ -531,10 +574,10 @@ const SegmentSection = ({ title, visits, segmentName }) => {
                         {!isClientOnlySegment && <div className="flex-1 pl-2">Actividad / Objetivo</div>}
                         <div className="w-10"></div>
                     </div>
-                    {visits.length === 0 ? (
+                    {safeVisits.length === 0 ? (
                         <div className="p-12 text-center text-slate-300 font-bold uppercase tracking-widest text-[10px]">Sin gestiones agregadas</div>
                     ) : (
-                        visits.map((v, idx) => (
+                        safeVisits.map((v, idx) => (
                             <DesktopRowFull
                                 key={v.id}
                                 v={v}
@@ -543,14 +586,14 @@ const SegmentSection = ({ title, visits, segmentName }) => {
                                 updateVisit={updateVisit}
                                 removeRow={removeRow}
                                 isTimeAvailable={isTimeAvailable}
-                                mockDatabase={mockDatabase}
+                                clientsDatabase={clientsDatabase}
                             />
                         ))
                     )}
                 </div>
 
                 <div className="lg:hidden space-y-4 px-3 py-6">
-                    {visits.map((v, idx) => (
+                    {safeVisits.map((v, idx) => (
                         <div key={v.id} className="glass-panel p-6 bg-white border border-slate-100">
                             <div className="flex justify-between items-center mb-6">
                                 <span className="bg-slate-900 text-white w-6 h-6 rounded flex items-center justify-center text-[10px] font-mono-tech">
@@ -558,16 +601,20 @@ const SegmentSection = ({ title, visits, segmentName }) => {
                                 </span>
                                 <div className="flex gap-2">
                                     <button onClick={() => removeRow(segmentName, idx)} className="p-2 bg-red-50 text-red-500 rounded-lg"><Trash2 size={14} /></button>
-                                    <select
-                                        value={v.time}
-                                        onChange={(e) => updateVisit(segmentName, idx, 'time', e.target.value)}
-                                        className={`border-none rounded px-3 py-1.5 text-[11px] font-black uppercase tracking-widest outline-none ${v.time ? 'bg-primary text-white' : 'bg-slate-100 text-slate-500'}`}
-                                    >
-                                        <option value="" disabled>Hora...</option>
-                                        {timeOptions.map(t => (
-                                            <option key={t} value={t} disabled={!isTimeAvailable(t, v.id)} className="bg-white text-primary">{t}</option>
-                                        ))}
-                                    </select>
+                                    {segmentName.toLowerCase().includes('compromiso') ? (
+                                        <div className="border-none rounded px-3 py-1.5 text-[11px] font-black uppercase tracking-widest outline-none bg-amber-50 text-amber-600">Todo el día</div>
+                                    ) : (
+                                        <select
+                                            value={v.time}
+                                            onChange={(e) => updateVisit(segmentName, idx, 'time', e.target.value)}
+                                            className={`border-none rounded px-3 py-1.5 text-[11px] font-black uppercase tracking-widest outline-none ${v.time ? 'bg-primary text-white' : 'bg-slate-100 text-slate-500'}`}
+                                        >
+                                            <option value="" disabled>Hora...</option>
+                                            {timeOptions.map(t => (
+                                                <option key={t} value={t} disabled={!isTimeAvailable(t, v.id)} className="bg-white text-primary">{t}</option>
+                                            ))}
+                                        </select>
+                                    )}
                                 </div>
                             </div>
                             <div className="space-y-4">
@@ -585,8 +632,35 @@ const SegmentSection = ({ title, visits, segmentName }) => {
 };
 
 const PlaneacionOperativo = () => {
-    const { currentAgenda, sendForAuthorization, resetAgenda, getVisibleSegments } = useAgenda();
-    const visibleSegments = getVisibleSegments();
+    const { currentAgenda, sendForAuthorization, resetAgenda } = useAgenda();
+    const { session } = useAuth();
+    
+    const [bloquesConfig, setBloquesConfig] = useState([]);
+    const [isLoadingBloques, setIsLoadingBloques] = useState(true);
+
+    useEffect(() => {
+        const fetchBloques = async () => {
+            if (!session?.idArea || !session?.puestoId) {
+                setIsLoadingBloques(false);
+                return;
+            }
+            try {
+                const API_COBRANZA = import.meta.env.VITE_API_ORIGIN_COBRANZA;
+                const response = await axios.get(
+                    `${API_COBRANZA}/bloques/area/${session.idArea}/puesto/${session.puestoId}`,
+                    { withCredentials: true }
+                );
+                if (response.data.codigo === 'OK' && response.data.contenido) {
+                    setBloquesConfig(response.data.contenido);
+                }
+            } catch (error) {
+                console.error("Error cargando bloques:", error);
+            } finally {
+                setIsLoadingBloques(false);
+            }
+        };
+        fetchBloques();
+    }, [session]);
 
     if (currentAgenda.status === 'pendiente' || currentAgenda.status === 'aprobada') {
         return (
@@ -615,11 +689,25 @@ const PlaneacionOperativo = () => {
                 </div>
             </header>
 
-            {visibleSegments.map(name => (
-                <SegmentSection key={name} title={name.toUpperCase()} visits={currentAgenda.segments[name]} segmentName={name} />
-            ))}
+            {isLoadingBloques ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                    <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+                    <p className="text-[10px] font-black uppercase tracking-widest">Cargando bloques de operación...</p>
+                </div>
+            ) : (
+                bloquesConfig.map((bloque) => {
+                    const safeVisits = (currentAgenda.segments && currentAgenda.segments[bloque.nombre]) ? currentAgenda.segments[bloque.nombre] : [];
+                    return (
+                        <SegmentSection 
+                            key={bloque.idBloque} 
+                            title={bloque.nombre.toUpperCase()} 
+                            visits={safeVisits} 
+                            segmentName={bloque.nombre} 
+                        />
+                    );
+                })
+            )}
 
-            {/* Segment E: Compromisos KPI Diario */}
             <KpiCompromisos />
 
             <footer className="fixed bottom-0 left-0 right-0 md:relative md:mt-20 z-40">
@@ -629,7 +717,7 @@ const PlaneacionOperativo = () => {
                     </button>
                     <div className="flex flex-col md:items-end gap-3 w-full md:w-auto">
                         <p className="hidden md:block text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-1">Certifica tu agenda para avisar al supervisor</p>
-                        <button onClick={sendForAuthorization} className="w-full md:w-auto bg-primary md:bg-white md:text-primary text-white px-20 py-6 rounded-[24px] text-xs font-black uppercase tracking-[0.3em] shadow-2xl hover:scale-105 active:scale-95 transition-all">
+                        <button onClick={() => sendForAuthorization(bloquesConfig)} className="w-full md:w-auto bg-primary md:bg-white md:text-primary text-white px-20 py-6 rounded-[24px] text-xs font-black uppercase tracking-[0.3em] shadow-2xl hover:scale-105 active:scale-95 transition-all">
                             Certificar Jornada
                         </button>
                     </div>
