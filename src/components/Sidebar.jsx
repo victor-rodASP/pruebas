@@ -80,13 +80,19 @@ const Sidebar = () => {
                 <div className="p-8 border-t border-white/5 bg-black/20 space-y-6">
                     {/* User Profile */}
                     <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center shadow-lg border border-white/5">
+                        <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center shadow-lg border border-white/5 shrink-0">
                             <UserCircle size={28} className="text-slate-400" />
                         </div>
                         <div className="flex flex-col min-w-0">
-                            <span className="text-xs font-black truncate leading-none mb-1">{session?.name || 'Usuario Demo'}</span>
-                            <span className="text-[9px] text-slate-500 truncate uppercase font-bold tracking-widest">{session?.site || 'Sede Matriz'}</span>
-                            <span className="text-[9px] text-slate-600 truncate font-semibold mt-1">{session?.email || 'demo@businesscontrol.com'}</span>
+                            <span className="text-xs font-black truncate leading-none mb-1 text-blue-100">
+                                {session?.name || 'Usuario Demo'}
+                            </span>
+                            <span className="text-[9px] text-blue-400 truncate uppercase font-bold tracking-widest">
+                                {session?.nombrePuesto || 'Operativo'}
+                            </span>
+                            <span className="text-[8px] text-slate-500 truncate font-semibold mt-1 uppercase tracking-widest">
+                                SUC: {session?.sucursal || 'Matriz'} | ÁREA: {session?.idArea || 1}
+                            </span>
                         </div>
                     </div>
 
@@ -117,11 +123,14 @@ const Sidebar = () => {
                             <ChevronDown size={14} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                         </div>
                         <div className="mt-2.5 flex items-center gap-2 px-1 flex-wrap">
-                            <span className={`w-1.5 h-1.5 rounded-full ${selectedRole.category === 'Operativo' ? 'bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)]' : 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]'}`}></span>
-                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">{selectedRole.category}</span>
+                            <span className={`w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.5)]`}></span>
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                                {session?.nombrePuesto || 'OPERATIVO'}
+                            </span>
                             <span className="text-slate-600">·</span>
-                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none capitalize">{selectedRole.canal}</span>
-                            {selectedRole.nivel && <span className="text-[8px] font-black text-slate-600 bg-white/5 px-1.5 py-0.5 rounded uppercase">Nivel {selectedRole.nivel}</span>}
+                            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest leading-none capitalize">
+                                {session?.idArea === 1 ? 'Comercial' : 'Cobranza'}
+                            </span>
                         </div>
                     </div>
 
